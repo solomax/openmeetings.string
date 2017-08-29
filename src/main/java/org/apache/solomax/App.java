@@ -34,8 +34,11 @@ import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
 import org.dom4j.io.OutputFormat;
 import org.dom4j.io.XMLWriter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class App {
+	private static Logger log = LoggerFactory.getLogger(App.class);
 	private static final String OM_ROOT = "/home/solomax/work/openmeetings/openmeetings";
 	private static final String APP_ROOT = String.format("%s/%s", OM_ROOT, "openmeetings-web/src/main/java/org/apache/openmeetings/web/app");
 	private static final String ENG_XML = String.format("%s/%s", APP_ROOT, "Application.properties.xml");
@@ -73,18 +76,18 @@ public class App {
 		document.addComment(FILE_COMMENT);
 		return document;
 	}
-	
+
 	public static Element createRoot(Document document) {
 		document.addDocType("properties", null, "http://java.sun.com/dtd/properties.dtd");
 		Element root = document.addElement("properties");
 		return root;
 	}
-	
+
 	public static Element createRoot(Document document, String _root) {
 		Element root = document.addElement(_root);
 		return root;
 	}
-	
+
 	public static void toXml(Writer out, Document doc) throws Exception {
 		OutputFormat outformat = OutputFormat.createPrettyPrint();
 		outformat.setIndentSize(1);
@@ -96,11 +99,11 @@ public class App {
 		out.flush();
 		out.close();
 	}
-	
+
 	public static void toXml(File f, Document doc) throws Exception {
 		toXml(new FileOutputStream(f), doc);
 	}
-	
+
 	public static void toXml(OutputStream out, Document doc) throws Exception {
 		toXml(new OutputStreamWriter(out, "UTF8"), doc);
 	}
@@ -131,24 +134,24 @@ public class App {
 			if (".project".equals(file.getName()) || ".classpath".equals(file.getName()) || file.getName().matches("Application.*.properties.xml")) {
 				continue;
 			}
-			final BufferedReader reader = new BufferedReader(new FileReader(file));
 			final StringBuilder contents = new StringBuilder();
-			while (reader.ready()) {
-				contents.append(reader.readLine());
+			try (final BufferedReader reader = new BufferedReader(new FileReader(file))) {
+				while (reader.ready()) {
+					contents.append(reader.readLine());
+				}
 			}
-			reader.close();
 			final String stringContents = contents.toString();
 			for (Iterator<Map.Entry<Long, PatternStringLabel>> iter = labels.entrySet().iterator(); iter.hasNext(); ) {
 				Map.Entry<Long, PatternStringLabel> e = iter.next();
 				Matcher m = e.getValue().p.matcher(stringContents);
 				if (m.find(0)) {
-					System.out.println(String.format("%s -> %s, '%s' [%s, %s] (%s)"
+					log.debug("{} -> {}, '{}' [{}, {}] ({})"
 							, file.getCanonicalPath().substring(OM_ROOT.length())
 							, e.getValue().key
 							, stringContents.substring(m.start(), m.end())
 							, m.start()
 							, m.end()
-							, labels.size()));
+							, labels.size());
 					iter.remove();
 				}
 			}
@@ -185,7 +188,7 @@ public class App {
 		Collections.sort(labels, new LabelComparator());
 		return labels;
 	}
-	
+
 	public static void main(String[] args) throws Exception {
 		Set<String> shareLabels = new HashSet<>(Arrays.asList("730",  "731",  "732",  "733",  "734"
 							,  "735",  "737",  "738",  "739",  "740"
@@ -253,7 +256,7 @@ public class App {
 		}
 		check(labels, new File(OM_ROOT));
 		for (Map.Entry<Long, PatternStringLabel> e : labels.entrySet()) {
-			System.out.println(String.format("KEY %s is NOT used", e.getKey()));
+			log.info("KEY {} is NOT used", e.getKey());
 		}
 		File[] langs = new File(APP_ROOT).listFiles(new FilenameFilter() {
 			@Override
@@ -265,7 +268,7 @@ public class App {
 			storeLabels(getLabels(f, labels), f);
 		}
 	}
-	
+
 	private static class StringLabel {
 		final String key;
 		final String value;
