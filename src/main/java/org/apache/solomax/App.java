@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.StringReader;
 import java.io.Writer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,6 +29,15 @@ import java.util.TreeMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.xml.XMLConstants;
+import javax.xml.namespace.NamespaceContext;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathFactory;
+
 import org.apache.wicket.extensions.markup.html.repeater.util.SortParam;
 import org.dom4j.Document;
 import org.dom4j.DocumentHelper;
@@ -36,6 +46,8 @@ import org.dom4j.io.OutputFormat;
 import org.dom4j.io.XMLWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 public class App {
 	private static Logger log = LoggerFactory.getLogger(App.class);
@@ -116,7 +128,7 @@ public class App {
 		return props;
 	}
 
-	public static void check(TreeMap<Long, PatternStringLabel> labels, File dir) throws IOException {
+	public static void check(TreeMap<Long, PatternStringLabel> labels, File dir) throws Exception {
 		File[] files = dir.listFiles();
 		for (final File file : files) {
 			if (file.isDirectory() && (
@@ -124,6 +136,7 @@ public class App {
 					|| "red5-server".equals(file.getName())
 					|| ".settings".equals(file.getName())
 					|| ".git".equals(file.getName())
+					|| "assembly".equals(file.getName())
 					)) {
 				continue;
 			}
@@ -140,19 +153,79 @@ public class App {
 					contents.append(reader.readLine());
 				}
 			}
-			final String stringContents = contents.toString();
-			for (Iterator<Map.Entry<Long, PatternStringLabel>> iter = labels.entrySet().iterator(); iter.hasNext(); ) {
-				Map.Entry<Long, PatternStringLabel> e = iter.next();
-				Matcher m = e.getValue().p.matcher(stringContents);
-				if (m.find(0)) {
-					log.debug("{} -> {}, '{}' [{}, {}] ({})"
-							, file.getCanonicalPath().substring(OM_ROOT.length())
-							, e.getValue().key
-							, stringContents.substring(m.start(), m.end())
-							, m.start()
-							, m.end()
-							, labels.size());
-					iter.remove();
+			if (file.getName().endsWith(".java")) {
+				final String stringContents = contents.toString();
+				for (Iterator<Map.Entry<Long, PatternStringLabel>> iter = labels.entrySet().iterator(); iter.hasNext(); ) {
+					Map.Entry<Long, PatternStringLabel> e = iter.next();
+					Matcher m = e.getValue().p.matcher(stringContents);
+					if (m.find(0)) {
+						log.debug("{} -> REGEX {}, '{}' [{}, {}] ({})"
+								, file.getCanonicalPath().substring(OM_ROOT.length())
+								, e.getValue().key
+								, stringContents.substring(m.start(), m.end())
+								, m.start()
+								, m.end()
+								, labels.size());
+						iter.remove();
+					}
+				}
+			} else if (file.getName().endsWith(".html")) {
+				DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+				factory.setNamespaceAware(true);
+				DocumentBuilder builder = factory.newDocumentBuilder();
+				org.w3c.dom.Document doc = null;
+				String tail = contents.toString();
+				if (tail.startsWith("<?xml")) {
+					tail = tail.substring("<?xml version=\"1.0\" encoding=\"UTF-8\"?>".length());
+				} else if (tail.startsWith("<!DOCTYPE html>")) {
+					tail = tail.substring("<!DOCTYPE html>".length());
+				}
+				try {
+					doc = builder.parse(new InputSource(new StringReader("<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE Tokens [<!ENTITY nbsp \"&#xa0;\">]>" + tail)));
+				} catch (Exception e) {
+					log.error("Unexpectederro while parsing {}, {}", file, tail);
+				}
+				XPathFactory xPathfactory = XPathFactory.newInstance();
+				{
+					XPath xpath = xPathfactory.newXPath();
+					xpath.setNamespaceContext(new WicketNamespaceContext());
+					XPathExpression expr = xpath.compile("//*[@wicket:message]/@wicket:message");
+					NodeList nl = (NodeList) expr.evaluate(doc, XPathConstants.NODESET);
+					for (int i = 0; i < nl.getLength(); ++i) {
+						String attr = nl.item(i).getTextContent();
+						String[] msgs = attr.split(",");
+						for (String msg : msgs) {
+							String[] parts = msg.split(":");
+							try {
+								Long key = Long.valueOf(parts[1]);
+								PatternStringLabel lbl = labels.remove(key);
+								if (lbl != null) {
+									log.debug("{} -> ATTR {}, ({})"
+											, file.getCanonicalPath().substring(OM_ROOT.length())
+											, key
+											, labels.size());
+								}
+							} catch (Exception e) {
+								//
+							}
+						}
+					}
+				}
+				for (Iterator<Map.Entry<Long, PatternStringLabel>> iter = labels.entrySet().iterator(); iter.hasNext(); ) {
+					Map.Entry<Long, PatternStringLabel> e = iter.next();
+					{
+						XPath xpath = xPathfactory.newXPath();
+						xpath.setNamespaceContext(new WicketNamespaceContext());
+						XPathExpression expr = xpath.compile(String.format("//wicket:message[@key=\"%s\"]", e.getKey()));
+						NodeList nl = (NodeList) expr.evaluate(doc, XPathConstants.NODESET);
+						if (nl.getLength() > 0) {
+							log.debug("{} -> NODE {}, ({})"
+									, file.getCanonicalPath().substring(OM_ROOT.length())
+									, e.getValue().key
+									, labels.size());
+							iter.remove();
+						}
+					}
 				}
 			}
 		}
@@ -326,5 +399,27 @@ public class App {
 			return (sort.isAscending() ? 1 : -1) * val;
 		}
 	}
-}
 
+	private static class WicketNamespaceContext implements NamespaceContext {
+		@Override
+		public String getPrefix(String namespaceURI) {
+			return null;
+		}
+
+		@Override
+		public Iterator getPrefixes(String namespaceURI) {
+			return null;
+		}
+
+		@Override
+		public String getNamespaceURI(String prefix) {
+			if (prefix == null) {
+				throw new NullPointerException("Invalid Namespace Prefix");
+			} else if ("wicket".equals(prefix)) {
+				return "http://wicket.apache.org";
+			} else {
+				return XMLConstants.NULL_NS_URI;
+			}
+		}
+	}
+}
