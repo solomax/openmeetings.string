@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -327,6 +328,27 @@ public class App {
 				}
 			}
 		}
+		// check duplicates
+		TreeMap<Long, PatternStringLabel> dlabels = new TreeMap<>(labels);
+		Map<Long, Set<Long>> duplicates = new TreeMap<>();
+		for (Map.Entry<Long, PatternStringLabel> e : labels.entrySet()) {
+			String val = e.getValue().value;
+			for (Iterator<Map.Entry<Long, PatternStringLabel>> iter = dlabels.entrySet().iterator(); iter.hasNext(); ) {
+				Map.Entry<Long, PatternStringLabel> ee = iter.next();
+				if (e.getKey().equals(ee.getKey())) {
+					iter.remove();
+					continue;
+				}
+				if (val.equals(ee.getValue().value)) {
+					if (!duplicates.containsKey(e.getKey())) {
+						duplicates.put(e.getKey(), new TreeSet<>());
+					}
+					duplicates.get(e.getKey()).add(ee.getKey());
+					iter.remove();
+				}
+			}
+		}
+		log.debug("Duplicates are: {}", duplicates);
 		check(labels, new File(OM_ROOT));
 		for (Map.Entry<Long, PatternStringLabel> e : labels.entrySet()) {
 			log.info("KEY {} is NOT used", e.getKey());
